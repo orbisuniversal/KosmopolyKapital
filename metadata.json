@@ -1,0 +1,6 @@
+{
+  "name": "Kosmopoly Think Tank",
+  "description": "Think like a hedge fund. Analyze like a pro. A sophisticated strategic intelligence cabinet, personal think tank, and macro research terminal.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

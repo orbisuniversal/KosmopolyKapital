@@ -1,0 +1,113 @@
+{
+  "entities": {
+    "user": {
+      "title": "User Profile",
+      "description": "User account info and application preferences",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "The unique user ID matching their authenticated Firebase UID" },
+        "email": { "type": "string", "description": "The authenticated email address of the trader" },
+        "displayName": { "type": "string", "description": "The full name or display name of the trader" },
+        "photoURL": { "type": "string", "description": "Profile picture URL from Google" },
+        "role": { "type": "string", "description": "Trader rank or tier inside Kosmopoly" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "email", "displayName", "role"]
+    },
+    "trade": {
+      "title": "Trade Journal Entry",
+      "description": "A single physical or simulated trade logged in the journal",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "The unique document ID representing the trade" },
+        "userId": { "type": "string", "description": "The UID of the user who owns this trade" },
+        "active": { "type": "string", "description": "Asset pair symbol, e.g. EUR/USD" },
+        "direction": { "type": "string", "enum": ["LONG", "SHORT"] },
+        "entryDate": { "type": "string" },
+        "exitDate": { "type": "string" },
+        "entryPrice": { "type": "number" },
+        "exitPrice": { "type": "number" },
+        "stopLoss": { "type": "number" },
+        "takeProfit": { "type": "number" },
+        "size": { "type": "number" },
+        "broker": { "type": "string" },
+        "session": { "type": "string" },
+        "pips": { "type": "number" },
+        "pnl": { "type": "number" },
+        "rr": { "type": "number" },
+        "setups": { "type": "array" },
+        "timeframe": { "type": "string" },
+        "macroConfluence": { "type": "string" },
+        "planAdherence": { "type": "number" },
+        "entryQuality": { "type": "number" },
+        "notes": { "type": "string" },
+        "screenshotUrl": { "type": "string" },
+        "emotionBefore": { "type": "string" },
+        "emotionBeforeIntensity": { "type": "number" },
+        "emotionDuring": { "type": "string" },
+        "emotionDuringIntensity": { "type": "number" },
+        "emotionAfter": { "type": "string" },
+        "emotionAfterIntensity": { "type": "number" },
+        "followedPlan": { "type": "string" },
+        "negativePatterns": { "type": "array" },
+        "audioMemoSimulated": { "type": "string" },
+        "lessonObtained": { "type": "string" },
+        "mindsetScore": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "userId", "active", "direction", "entryPrice", "exitPrice", "size", "pnl", "createdAt"]
+    },
+    "admin_config": {
+      "title": "Global Administrative Configurations",
+      "description": "Biases, weekly signals, economic events, and system notifications",
+      "type": "object",
+      "properties": {
+        "data": { "type": "object", "description": "Structured field data varying depending on config doc type" }
+      }
+    },
+    "social_post": {
+      "title": "Social Hub Post",
+      "description": "A public post in the institutional social feed",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "userName": { "type": "string" },
+        "userRole": { "type": "string" },
+        "type": { "type": "string", "enum": ["signal", "analysis", "thought"] },
+        "content": { "type": "string" },
+        "sentiment": { "type": "string" },
+        "asset": { "type": "string" },
+        "timestamp": { "type": "string" },
+        "likes": { "type": "array" },
+        "commentsCount": { "type": "number" },
+        "sharesCount": { "type": "number" },
+        "signalData": { "type": "object" },
+        "createdAt": { "type": "string" }
+      }
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "user",
+      "description": "Individual user accounts partitioned by UID"
+    },
+    "/trades/{tradeId}": {
+      "schema": "trade",
+      "description": "Trading journal logs indexed by custom trade IDs and queried securely per user"
+    },
+    "/admin_config/{docId}": {
+      "schema": "admin_config",
+      "description": "Global settings for monitoring lenses, signals, events, and announcements"
+    },
+    "/social_posts/{postId}": {
+      "schema": "social_post",
+      "description": "Public strategic feed posts"
+    },
+    "/social_posts/{postId}/comments/{commentId}": {
+      "description": "Threaded discussions for signals and analysis"
+    }
+  }
+}
