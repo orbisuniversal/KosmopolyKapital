@@ -271,7 +271,7 @@ export async function runAnalysis360Pipeline(input: AgentPipelineInput): Promise
   let collectorSucceeded = false;
 
   // =========================================================================
-  // SUB-AGENTE 1: RECOLECTOR (Gemini Flash + Google Search Grounding)
+  // SUB-AGENTE 1: RECOLECTOR (Gemini Flash)
   // =========================================================================
   onProgress?.(1, `Escaneando fuentes globales y feeds financieros en tiempo real para ${assetName}...`);
   try {
@@ -279,18 +279,28 @@ export async function runAnalysis360Pipeline(input: AgentPipelineInput): Promise
 
 Provee una lista estructurada de hechos verificables con fecha aproximada y nombre de la fuente de noticias o entidad reguladora correspondiente.`;
 
-    const collectorResponse = await callGeminiSafe(ai, MODEL_FLASH, FALLBACK_FLASH, {
+    console.log(`[Agente 1] Iniciando llamada a Gemini para "${assetName}" (Tipo: ${assetType})...`);
+
+    const COLLECTOR_TIMEOUT_MS = 20000;
+    const timeoutPromise = new Promise<any>((_, reject) =>
+      setTimeout(() => reject(new Error('Timeout de 20s agotado en Agente 1 (Recolector)')), COLLECTOR_TIMEOUT_MS)
+    );
+
+    const collectorPromise = callGeminiSafe(ai, MODEL_FLASH, FALLBACK_FLASH, {
       contents: collectorPrompt,
       systemInstruction: COLLECTOR_SYSTEM_PROMPT,
-      tools: [{ googleSearch: {} }],
       temperature: 0.7,
     });
 
-    collectorFactsText = collectorResponse.text;
+    const collectorResponse = await Promise.race([collectorPromise, timeoutPromise]);
+
+    console.log(`[Agente 1] Respuesta recibida, longitud: ${collectorResponse?.text?.length || 0}`);
+
+    collectorFactsText = collectorResponse?.text || '';
     collectorSucceeded = Boolean(collectorFactsText && collectorFactsText.length > 50);
 
-    // Extraer fuentes del Grounding Metadata
-    if (collectorResponse.groundingMetadata?.groundingChunks) {
+    // Extraer fuentes del Grounding Metadata si existe
+    if (collectorResponse?.groundingMetadata?.groundingChunks) {
       for (const chunk of collectorResponse.groundingMetadata.groundingChunks) {
         if (chunk.web?.title) {
           sourcesUsedSet.add(chunk.web.title);
@@ -305,9 +315,10 @@ Provee una lista estructurada de hechos verificables con fecha aproximada y nomb
       }
     }
   } catch (err: any) {
+    console.error(`[Agente 1 Error]:`, err?.message || err);
     collectorFactsText = '';
     collectorSucceeded = false;
-    const warningMsg = `Agente Recolector (Grounding) no disponible o excedió tiempo límite: ${err?.message || 'Error de búsqueda web'}. Se procede con datos cuantitativos.`;
+    const warningMsg = `Agente Recolector no disponible o excedió tiempo límite: ${err?.message || 'Error de búsqueda web'}. Se procede con datos cuantitativos.`;
     degradedDataWarnings.push(warningMsg);
     stepWarnings.push({ step: 1, message: warningMsg, timestamp: new Date().toISOString() });
   }
