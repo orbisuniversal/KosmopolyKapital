@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Trade } from '../types';
 import { Language, t } from '../i18n';
+import TradeJournal from './TradeJournal';
 import { 
   DollarSign, 
   TrendingUp, 
@@ -42,6 +43,11 @@ interface FinanceCenterProps {
   trades: Trade[];
   theme: 'dark' | 'light';
   language: Language;
+  onAddTrade?: (trade: Trade) => void;
+  onDeleteTrade?: (id: string) => void;
+  journalActiveSubTab?: 'general' | 'register' | 'history' | 'psychology' | 'analytics';
+  setJournalActiveSubTab?: (tab: 'general' | 'register' | 'history' | 'psychology' | 'analytics') => void;
+  initialTab?: 'dashboard' | 'accounts' | 'journal' | 'goals' | 'investments' | 'advisor';
 }
 
 // Data structures
@@ -121,10 +127,26 @@ const DEFAULT_INVOICES: CorporateInvoice[] = [];
 
 const DEFAULT_CORP_EXPENSES: CorporateExpense[] = [];
 
-export default function FinanceCenter({ trades, theme, language }: FinanceCenterProps) {
-  // Tabs for the 7 Pillars
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'accounts' | 'account_detail' | 'goals' | 'investments' | 'advisor'>('dashboard');
+export default function FinanceCenter({ 
+  trades, 
+  theme, 
+  language,
+  onAddTrade,
+  onDeleteTrade,
+  journalActiveSubTab,
+  setJournalActiveSubTab,
+  initialTab
+}: FinanceCenterProps) {
+  // Tabs for the Pillars (including Diario de Inversiones)
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'accounts' | 'account_detail' | 'journal' | 'goals' | 'investments' | 'advisor'>(initialTab || 'dashboard');
+  const [localJournalSubTab, setLocalJournalSubTab] = useState<'general' | 'register' | 'history' | 'psychology' | 'analytics'>('general');
   const [activeAccount, setActiveAccount] = useState<Account | null>(null);
+
+  useEffect(() => {
+    if (initialTab) {
+      setActiveTab(initialTab);
+    }
+  }, [initialTab]);
 
   // Sub-data states
   const [accounts, setAccounts] = useState<Account[]>(DEFAULT_ACCOUNTS);
@@ -868,7 +890,7 @@ export default function FinanceCenter({ trades, theme, language }: FinanceCenter
         </div>
       </div>
 
-      {/* 7-PILLARS TAB NAVIGATION BAR */}
+      {/* TAB NAVIGATION BAR */}
       <div className="flex flex-wrap gap-2 pb-2 border-b border-white/5">
         <button 
           onClick={() => setActiveTab('dashboard')}
@@ -883,12 +905,27 @@ export default function FinanceCenter({ trades, theme, language }: FinanceCenter
         <button 
           onClick={() => setActiveTab('accounts')}
           className={`flex items-center gap-2 px-4 py-2.5 rounded-full text-xs font-bold uppercase tracking-wider transition-all cursor-pointer border shrink-0 ${
-            activeTab === 'accounts'
+            activeTab === 'accounts' || activeTab === 'account_detail'
               ? 'bg-gold-accent text-black border-gold-accent'
               : (theme === 'dark' ? 'bg-[#0E1117] hover:bg-neutral-900 text-txt-secondary border-white/5' : 'bg-white hover:bg-neutral-50 text-neutral-800 border-neutral-200 shadow-sm')
           }`}
         >
           <Layers className="w-4 h-4" /> 🏦 {t('AccountsNav', language)}
+        </button>
+        <button 
+          onClick={() => setActiveTab('journal')}
+          className={`flex items-center gap-2 px-4 py-2.5 rounded-full text-xs font-bold uppercase tracking-wider transition-all cursor-pointer border shrink-0 ${
+            activeTab === 'journal'
+              ? 'bg-gold-accent text-black border-gold-accent'
+              : (theme === 'dark' ? 'bg-[#0E1117] hover:bg-neutral-900 text-txt-secondary border-white/5' : 'bg-white hover:bg-neutral-50 text-neutral-800 border-neutral-200 shadow-sm')
+          }`}
+        >
+          <Award className="w-4 h-4" /> 📓 Diario de Inversiones
+          <span className={`text-[10px] font-mono px-1.5 py-0.2 rounded-full font-bold ${
+            activeTab === 'journal' ? 'bg-black/30 text-white' : 'bg-gold-accent/15 text-gold-accent'
+          }`}>
+            {trades.length}
+          </span>
         </button>
         <button 
           onClick={() => setActiveTab('goals')}
@@ -1340,6 +1377,43 @@ export default function FinanceCenter({ trades, theme, language }: FinanceCenter
         </div>
       )}
 
+      {/* 3. DIARIO DE INVERSIONES VIEW */}
+      {activeTab === 'journal' && (
+        <div className="space-y-6">
+          <div className={`p-4 rounded-2xl border flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
+            theme === 'dark' ? 'bg-neutral-900/40 border-white/5' : 'bg-white border-neutral-200 shadow-sm'
+          }`}>
+            <div className="flex items-center gap-3">
+              <div className="w-9 h-9 rounded-xl bg-gold-accent/15 text-gold-accent flex items-center justify-center font-bold">
+                <Award className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-xs font-display font-bold text-txt-primary uppercase tracking-wider">
+                  Diario de Inversiones & Bitácora de Trades
+                </h3>
+                <p className="text-[11px] text-txt-muted">
+                  Registros operativos, gestión del riesgo, psicología y análisis conectados a tus balances y tesorería global.
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] font-mono text-txt-secondary bg-black/20 px-3 py-1.5 rounded-full border border-white/5">
+                Total Operaciones: <strong className="text-gold-accent">{trades.length}</strong>
+              </span>
+            </div>
+          </div>
+
+          <TradeJournal 
+            trades={trades} 
+            theme={theme}
+            onAddTrade={onAddTrade || (() => {})}
+            onDeleteTrade={onDeleteTrade || (() => {})}
+            activeSubTab={journalActiveSubTab || localJournalSubTab}
+            setActiveSubTab={setJournalActiveSubTab || setLocalJournalSubTab}
+          />
+        </div>
+      )}
+
       {/* 4. GOALS NAVIGATION VIEW */}
       {activeTab === 'goals' && (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -1535,9 +1609,17 @@ export default function FinanceCenter({ trades, theme, language }: FinanceCenter
           <div className="lg:col-span-2 space-y-6">
             
             <div className={`p-6 rounded-2xl border ${theme === 'dark' ? 'bg-[#10121A] border-white/5' : 'bg-white border-neutral-200 shadow-sm'} space-y-4`}>
-              <h3 className="text-sm font-display font-medium text-gold-accent uppercase tracking-wider border-b border-white/5 pb-2">
-                Pilar 5: Portfolio de Activos del Diario de Inversiones vinculados
-              </h3>
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-white/5 pb-2">
+                <h3 className="text-sm font-display font-medium text-gold-accent uppercase tracking-wider">
+                  Pilar 5: Portfolio de Activos del Diario de Inversiones vinculados
+                </h3>
+                <button
+                  onClick={() => setActiveTab('journal')}
+                  className="text-xs font-bold text-black bg-gold-accent px-3 py-1 rounded-full uppercase tracking-wider cursor-pointer hover:bg-gold-accent/90 transition flex items-center gap-1.5 self-start sm:self-auto"
+                >
+                  <Award className="w-3.5 h-3.5" /> Abrir Diario de Inversiones →
+                </button>
+              </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
                 <div className="bg-black/15 p-4 rounded-xl border border-white/5 text-center">

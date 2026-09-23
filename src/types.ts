@@ -125,3 +125,101 @@ export interface SocialComment {
   content: string;
   timestamp: string;
 }
+
+// ==========================================
+// 360 Institutional Analysis Engine Types
+// ==========================================
+
+export interface TimeSeriesPoint {
+  date: string; // ISO YYYY-MM-DD
+  value: number | null;
+}
+
+export interface DataSourceResult {
+  source: 'live' | 'cache' | 'degraded';
+  data: TimeSeriesPoint[];
+  reason?: string;
+  cachedAt?: string;
+}
+
+export interface RollingCorrelationResult {
+  currentCorrelation: number | null;
+  correlationSevenDaysAgo: number | null;
+  delta: number;
+  regimeShift: boolean; // true si |delta| > 0.3
+  windowDays: number; // 30 por defecto
+}
+
+export interface FlowAnomalyResult {
+  latestValue: number;
+  movingAverage12Weeks: number;
+  standardDeviation: number;
+  zScore: number;
+  signal: 'sobrecompra_institucional' | 'distribucion_institucional' | 'normal';
+}
+
+export interface ChangePointResult {
+  changePointDetected: boolean;
+  changePointDate: string | null;
+  confidenceLevel: number; // aproximación de significancia estadística (0 a 1)
+  seriesName: string;
+}
+
+export interface MacroRegimeResult {
+  regime: 'crecimiento_estable' | 'sobrecalentamiento' | 'estanflacion' | 'recesion';
+  growthZScore: number;
+  inflationZScore: number;
+  confidence: 'alta' | 'media' | 'baja';
+}
+
+export interface TriangulationResult {
+  officialValue: number;
+  proxyValue: number;
+  divergencePercent: number;
+  flagged: boolean; // true si divergencePercent > umbral configurable
+}
+
+export interface AgentPipelineInput {
+  assetName: string;
+  assetType: 'equity' | 'bond' | 'currency' | 'commodity' | 'crypto' | 'index' | 'reit';
+  analysisDepth?: 'macro' | 'project_deep_dive';
+  rawDataResults: DataSourceResult[]; // del Paso 1
+  quantResults: {
+    correlations: RollingCorrelationResult[];
+    flowAnomaly: FlowAnomalyResult | null;
+    changePoint: ChangePointResult | null;
+    macroRegime: MacroRegimeResult;
+    triangulation: TriangulationResult[];
+  }; // del Paso 2
+  onProgress?: (step: number, message: string) => void; // callback opcional para streaming
+}
+
+export interface QuantSnapshot {
+  correlations: RollingCorrelationResult[];
+  flowAnomaly: FlowAnomalyResult | null;
+  changePoint: ChangePointResult | null;
+  macroRegime: MacroRegimeResult;
+}
+
+export interface AgentPipelineOutput {
+  finalReport: string; // markdown estructurado
+  sourcesUsed: string[];
+  auditPassed: boolean;
+  degradedDataWarnings: string[]; // fuentes que llegaron como 'degraded' o 'cache'
+  stepWarnings?: { step: number; message: string; timestamp: string }[];
+  generatedAt: string; // ISO timestamp
+  specializedSubAgentUsed?: string | null;
+  fromCache?: boolean;
+  expiresAt?: string;
+  quantSnapshot?: QuantSnapshot;
+}
+
+export interface SSEProgressEvent {
+  type: 'progress' | 'complete' | 'error';
+  step?: number;
+  message?: string; // mensaje del narrador (del prompt de personalidad)
+  payload?: AgentPipelineOutput; // solo presente cuando type === 'complete'
+  errorDetail?: string; // solo presente cuando type === 'error', mensaje ya traducido a lenguaje no técnico
+}
+
+

@@ -10,6 +10,7 @@ export const translations = {
     Radar: 'Radar Macro',
     Academy: 'Mentor IA & Academia',
     Settings: 'Preferencias',
+    Analysis360: 'Análisis 360°',
     Admin: 'Panel de Admin',
     
     // Finance Center
@@ -22,7 +23,8 @@ export const translations = {
     Manage: 'Gestionar',
     
     // Nav Labels
-    Dashboard: 'Dashboard',
+    DashboardNav: 'Dashboard',
+    JournalNav: 'Diario de Inversiones',
     AccountsNav: 'Cuentas',
     TransactionsNav: 'Presupuestos',
     GoalsNav: 'Metas',
@@ -45,6 +47,7 @@ export const translations = {
     Radar: 'Macro Radar',
     Academy: 'AI Mentor & Academy',
     Settings: 'Settings',
+    Analysis360: '360° Analysis',
     Admin: 'Admin Panel',
     
     // Finance Center
@@ -57,7 +60,8 @@ export const translations = {
     Manage: 'Manage',
     
     // Nav Labels
-    Dashboard: 'Dashboard',
+    DashboardNav: 'Dashboard',
+    JournalNav: 'Trade Journal',
     AccountsNav: 'Accounts',
     TransactionsNav: 'Budgets',
     GoalsNav: 'Goals',

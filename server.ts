@@ -1,11 +1,57 @@
+import dotenv from "dotenv";
+dotenv.config();
+
 import express from "express";
 import path from "path";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI } from "@google/genai";
+import { getFredSeries, getStablecoinSupplyHistory, getChainTVLHistory } from "./src/services/dataSources";
+import {
+  computeRollingPearsonCorrelation,
+  computeFlowZScore,
+  detectChangePoint,
+  classifyMacroRegime,
+  triangulateDataPoint,
+} from "./src/services/quantEngine";
+import { runAnalysis360Pipeline } from "./src/services/agentPipeline";
+import { SSEProgressEvent, AgentPipelineInput, DataSourceResult, QuantSnapshot } from "./src/types";
+import {
+  getCachedDossier,
+  saveDossierToCache,
+  incrementDailyPipelineRuns,
+  incrementDailyCacheHits,
+} from "./src/services/dossierCache";
+
+// In-memory rate limiting map for /api/analysis-360 (10 requests per 5 minutes per IP)
+const rateLimitMap = new Map<string, number[]>();
+const RATE_LIMIT_WINDOW_MS = 5 * 60 * 1000;
+const RATE_LIMIT_MAX_REQUESTS = 10;
+
+function checkRateLimit(ip: string): boolean {
+  const now = Date.now();
+  const timestamps = rateLimitMap.get(ip) || [];
+  const validTimestamps = timestamps.filter(t => now - t < RATE_LIMIT_WINDOW_MS);
+  if (validTimestamps.length >= RATE_LIMIT_MAX_REQUESTS) {
+    rateLimitMap.set(ip, validTimestamps);
+    return false;
+  }
+  validTimestamps.push(now);
+  rateLimitMap.set(ip, validTimestamps);
+  return true;
+}
+
+function sendSSEEvent(res: express.Response, event: SSEProgressEvent): void {
+  res.write(`data: ${JSON.stringify(event)}\n\n`);
+  if (typeof (res as any).flush === 'function') {
+    (res as any).flush();
+  }
+}
 
 async function startServer() {
   const app = express();
   const PORT = 3000;
+
+  app.use(express.json());
 
   // XML string cleaning utility
   function cleanXmlString(str: string): string {
@@ -451,6 +497,229 @@ Cualquier daño físico o "sabotaje técnico" sospechoso reportado en las línea
       });
     }
   });
+
+  // =========================================================================
+  // PASO 4: ENDPOINT SSE /api/analysis-360
+  // =========================================================================
+  const validAssetTypes = ['equity', 'bond', 'currency', 'commodity', 'crypto', 'index'] as const;
+  type ValidAssetType = typeof validAssetTypes[number];
+
+  const handleAnalysis360Request = async (req: express.Request, res: express.Response) => {
+    // 1. Extraer y sanitizar parámetros
+    const rawAssetName = (req.params.assetName || req.body?.assetName || req.query.assetName || '') as string;
+    const rawAssetType = (req.body?.assetType || req.query.assetType || '') as string;
+    const rawAnalysisDepth = (req.body?.analysisDepth || req.query.analysisDepth || 'macro') as string;
+
+    const assetName = typeof rawAssetName === 'string' ? rawAssetName.trim().slice(0, 100) : '';
+    const assetType = rawAssetType.toLowerCase().trim() as ValidAssetType;
+    const analysisDepth = rawAnalysisDepth === 'project_deep_dive' ? 'project_deep_dive' : 'macro';
+
+    // Validación previa a headers SSE
+    if (!assetName || assetName.length < 2) {
+      return res.status(400).json({
+        error: 'El parámetro assetName es obligatorio y debe tener al menos 2 caracteres.'
+      });
+    }
+
+    if (!validAssetTypes.includes(assetType)) {
+      return res.status(400).json({
+        error: `El parámetro assetType es inválido. Valores admitidos: ${validAssetTypes.join(', ')}.`
+      });
+    }
+
+    // Rate Limiting por IP (10 peticiones cada 5 minutos)
+    const clientIp = (req.headers['x-forwarded-for'] as string || req.socket.remoteAddress || 'unknown-ip').split(',')[0].trim();
+    if (!checkRateLimit(clientIp)) {
+      return res.status(429).json({
+        error: 'Límite de solicitudes alcanzado para este recurso. Por favor intenta de nuevo en unos minutos.'
+      });
+    }
+
+    // 2. Configuración estricta de headers SSE
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.flushHeaders();
+
+    // Detección de desconexión del cliente para abortar procesamiento
+    let isClientConnected = true;
+    req.on('close', () => {
+      isClientConnected = false;
+    });
+
+    try {
+      // =========================================================================
+      // PASO 5: VERIFICACIÓN DE CACHÉ COMPARTIDO EN FIRESTORE
+      // =========================================================================
+      // Comprobar si existe un dossier vigente en Firestore para este activo.
+      // Si existe y no ha expirado, emitir directamente el evento 'complete' con
+      // fromCache: true y cerrar la conexión en milisegundos sin consumir cuota.
+      try {
+        const cachedEntry = await getCachedDossier(assetName);
+        if (cachedEntry && !cachedEntry.isExpired) {
+          console.log(`[Dossier Cache HIT] Sirviendo informe persistente para "${assetName}" desde Firestore.`);
+          // Registro asíncrono de estadística de acierto en caché
+          incrementDailyCacheHits().catch(() => {});
+
+          if (isClientConnected) {
+            sendSSEEvent(res, {
+              type: 'complete',
+              payload: {
+                ...cachedEntry.output,
+                fromCache: true,
+              },
+            });
+            res.end();
+            return;
+          }
+        } else if (cachedEntry?.isExpired) {
+          console.log(`[Dossier Cache EXPIRED] El informe para "${assetName}" ha caducado; recalculando pipeline.`);
+        }
+      } catch (cacheErr: any) {
+        // Resiliencia: Si falla Firestore al leer, degradar ejecutando el pipeline normal
+        console.warn(`[Dossier Cache Warning] Fallo no crítico al consultar caché para "${assetName}":`, cacheErr.message);
+      }
+
+      // =========================================================================
+      // PASO 1: EJECUTAR DATASOURCES (Circuit Breakers)
+      // =========================================================================
+      if (!isClientConnected) return;
+      sendSSEEvent(res, {
+        type: 'progress',
+        step: 1,
+        message: `Escaneando fuentes institucionales globales y feeds de liquidez para ${assetName}...`,
+      });
+
+      // Recopilar series según tipo de activo
+      const rawDataResults: DataSourceResult[] = [];
+      const [t10y2yRes, cpiRes, m2Res, stablesRes, ethTvlRes] = await Promise.all([
+        getFredSeries('T10Y2Y', { start: '2024-01-01' }),
+        getFredSeries('CPIAUCSL', { start: '2024-01-01' }),
+        getFredSeries('M2SL', { start: '2024-01-01' }),
+        assetType === 'crypto' ? getStablecoinSupplyHistory() : Promise.resolve({ source: 'live' as const, data: [] }),
+        assetType === 'crypto' ? getChainTVLHistory('Ethereum') : Promise.resolve({ source: 'live' as const, data: [] }),
+      ]);
+
+      rawDataResults.push(t10y2yRes, cpiRes, m2Res);
+      if (assetType === 'crypto') {
+        rawDataResults.push(stablesRes, ethTvlRes);
+      }
+
+      if (!isClientConnected) return;
+
+      // =========================================================================
+      // PASO 2: EJECUTAR MOTOR CUANTITATIVO DETERMINISTA
+      // =========================================================================
+      sendSSEEvent(res, {
+        type: 'progress',
+        step: 2,
+        message: 'Ejecutando motor estadístico determinista: correlaciones de Pearson rodantes, Z-scores y regímenes macro...',
+      });
+
+      // Cálculos estadísticos deterministas
+      const primarySeries = assetType === 'crypto' && ethTvlRes.data.length > 5 ? ethTvlRes.data : m2Res.data;
+      const benchmarkSeries = t10y2yRes.data;
+
+      const correlationResult = computeRollingPearsonCorrelation(benchmarkSeries, primarySeries, 30);
+      const flowAnomalyResult = assetType === 'crypto' && stablesRes.data.length > 5 
+        ? computeFlowZScore(stablesRes.data, 12) 
+        : computeFlowZScore(m2Res.data, 12);
+      
+      const changePointResult = detectChangePoint(t10y2yRes.data, 'Spread Curva 10Y-2Y (T10Y2Y)');
+      const macroRegimeResult = classifyMacroRegime(primarySeries, cpiRes.data);
+      const triangulationResult = [
+        triangulateDataPoint(t10y2yRes.data.slice(-5), primarySeries.slice(-5), 10),
+      ];
+
+      const quantSnapshot: QuantSnapshot = {
+        correlations: [correlationResult],
+        flowAnomaly: flowAnomalyResult,
+        changePoint: changePointResult,
+        macroRegime: macroRegimeResult,
+      };
+
+      const quantResults = {
+        ...quantSnapshot,
+        triangulation: triangulationResult,
+      };
+
+      if (!isClientConnected) return;
+
+      // =========================================================================
+      // PASO 3: EJECUTAR PIPELINE DE 4 SUB-AGENTES
+      // =========================================================================
+      const pipelineInput: AgentPipelineInput = {
+        assetName,
+        assetType,
+        analysisDepth,
+        rawDataResults,
+        quantResults,
+        onProgress: (step, message) => {
+          if (!isClientConnected) return;
+          sendSSEEvent(res, {
+            type: 'progress',
+            step,
+            message,
+          });
+        },
+      };
+
+      const pipelineOutput = await runAnalysis360Pipeline(pipelineInput);
+
+      // =========================================================================
+      // PASO 5: PERSISTENCIA EN FIRESTORE Y ACTUALIZACIÓN DE CONTADOR
+      // =========================================================================
+      // NOTA DE CONCURRENCIA: Si dos peticiones simultáneas procesan el mismo activo
+      // sin caché válido, ambas ejecutan el pipeline de forma independiente. La segunda
+      // escritura en Firestore simplemente sobrescribe a la primera con datos igualmente
+      // válidos. Se prioriza la simplicidad sobre la sobre-ingeniería de locks distribuidos
+      // dado el volumen esperado.
+      //
+      // RESILIENCIA: La escritura en Firestore se realiza protegiendo la respuesta al
+      // cliente; si la base de datos falla al guardar, el informe ya generado se emite
+      // igualmente al usuario sin interrumpir su flujo.
+      saveDossierToCache(assetName, assetType, pipelineOutput, quantSnapshot)
+        .then((saved) => {
+          if (saved) {
+            console.log(`[Dossier Cache SAVED] Informe guardado con éxito para "${assetName}" en Firestore.`);
+          }
+        })
+        .catch((err) => {
+          console.warn(`[Dossier Cache Warning] No se pudo guardar en Firestore para "${assetName}":`, err.message);
+        });
+
+      // Incrementar atómicamente el contador de ejecuciones reales del pipeline
+      incrementDailyPipelineRuns().catch(() => {});
+
+      if (!isClientConnected) return;
+
+      // 6. Emitir evento complete con AgentPipelineOutput
+      sendSSEEvent(res, {
+        type: 'complete',
+        payload: {
+          ...pipelineOutput,
+          fromCache: false,
+          quantSnapshot,
+        },
+      });
+
+      res.end();
+    } catch (err: any) {
+      console.error(`[Analysis-360 Error] Asset: ${assetName}, Error:`, err);
+      if (isClientConnected) {
+        sendSSEEvent(res, {
+          type: 'error',
+          errorDetail: 'No se pudo completar el análisis en este momento. Intenta de nuevo en unos minutos.',
+        });
+        res.end();
+      }
+    }
+  };
+
+  // Soportar tanto POST como GET para máxima versatilidad
+  app.post("/api/analysis-360", handleAnalysis360Request);
+  app.get("/api/analysis-360/:assetName", handleAnalysis360Request);
+  app.get("/api/analysis-360", handleAnalysis360Request);
 
   // Vite integration
   if (process.env.NODE_ENV !== "production") {

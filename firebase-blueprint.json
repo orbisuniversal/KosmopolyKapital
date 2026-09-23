@@ -87,6 +87,34 @@
         "signalData": { "type": "object" },
         "createdAt": { "type": "string" }
       }
+    },
+    "dossier": {
+      "title": "360 Analysis Dossier Cache",
+      "description": "Shared cached institutional analysis report for an asset to prevent duplicate grounding and quant computation",
+      "type": "object",
+      "properties": {
+        "assetName": { "type": "string", "description": "Normalized asset key name" },
+        "assetType": { "type": "string", "enum": ["equity", "bond", "currency", "commodity", "crypto", "index"] },
+        "finalReport": { "type": "string", "description": "Full Markdown dossier audited by institutional auditor" },
+        "sourcesUsed": { "type": "array", "description": "List of sources cited in the analysis" },
+        "auditPassed": { "type": "boolean", "description": "Whether the dossier passed the risk filter and source verification" },
+        "degradedDataWarnings": { "type": "array", "description": "List of circuit-breaker fallback or cache warnings" },
+        "generatedAt": { "type": "string", "format": "date-time" },
+        "expiresAt": { "type": "string", "format": "date-time" },
+        "quantSnapshot": { "type": "object", "description": "Quantitative metrics snapshot for charts and divergence review" }
+      },
+      "required": ["assetName", "assetType", "finalReport", "auditPassed", "generatedAt", "expiresAt"]
+    },
+    "usage_stat": {
+      "title": "Daily API and Pipeline Usage Counter",
+      "description": "Atomic counters for real Gemini and data pipeline runs per day to monitor grounding limits",
+      "type": "object",
+      "properties": {
+        "date": { "type": "string" },
+        "totalPipelineRuns": { "type": "number" },
+        "cacheHits": { "type": "number" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      }
     }
   },
   "firestore": {
@@ -108,6 +136,14 @@
     },
     "/social_posts/{postId}/comments/{commentId}": {
       "description": "Threaded discussions for signals and analysis"
+    },
+    "/dossiers/{assetName}": {
+      "schema": "dossier",
+      "description": "Shared cached dossier documents keyed by normalized asset symbol"
+    },
+    "/usage/{statId}": {
+      "schema": "usage_stat",
+      "description": "Global daily usage stats and pipeline invocation counters"
     }
   }
 }

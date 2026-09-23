@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Trade, EconomicEvent } from '../types';
+import MacroRadar from './MacroRadar';
 import { 
   DollarSign, 
   TrendingUp, 
@@ -17,8 +18,16 @@ import {
   Layers,
   Sparkles,
   Activity,
-  Star
+  Star,
+  ArrowRight,
+  ShieldAlert,
+  Loader2,
+  FileText,
+  X
 } from 'lucide-react';
+import { useAnalysis360 } from '../hooks/useAnalysis360';
+import { AnalysisProgressView } from './AnalysisProgressView';
+import { Analysis360Report } from './Analysis360Report';
 
 interface CommandCenterProps {
   trades: Trade[];
@@ -27,6 +36,7 @@ interface CommandCenterProps {
   onNavigate: (tab: string) => void;
   onOpenQuickTrade: () => void;
   customAssets?: any;
+  customSignals?: any;
 }
 
 type AssetKey = 
@@ -49,7 +59,8 @@ export default function CommandCenter({
   theme, 
   onNavigate, 
   onOpenQuickTrade,
-  customAssets
+  customAssets,
+  customSignals
 }: CommandCenterProps) {
   const [timeStr, setTimeStr] = useState('');
   const [selectedAsset, setSelectedAsset] = useState<AssetKey>('BTC/USD');
@@ -69,6 +80,35 @@ export default function CommandCenter({
     NewYork: '',
     Asia: ''
   });
+
+  // Analysis 360 SSE Hook
+  const {
+    status: status360,
+    isLoading: is360Loading,
+    currentStep: step360,
+    currentMessage: msg360,
+    result: report360,
+    fromCache: fromCache360,
+    errorMessage: error360,
+    trigger: triggerAnalysis360,
+    cancel: abortAnalysis360,
+  } = useAnalysis360();
+
+  const [show360Modal, setShow360Modal] = useState(false);
+
+  const getAssetTypeFromKey = (key: AssetKey): 'crypto' | 'currency' | 'commodity' | 'index' | 'bond' => {
+    if (key.includes('BTC') || key.includes('ETH') || key.includes('SOL')) return 'crypto';
+    if (key.includes('GOLD') || key.includes('SILVER') || key.includes('BRENT') || key.includes('WTI')) return 'commodity';
+    if (key.includes('SPX') || key.includes('NASDAQ')) return 'index';
+    if (key.includes('US10Y')) return 'bond';
+    return 'currency';
+  };
+
+  const handleLaunch360 = () => {
+    setShow360Modal(true);
+    const assetType = getAssetTypeFromKey(selectedAsset);
+    triggerAnalysis360(selectedAsset, assetType);
+  };
 
   // Watchlist state load and save
   const [watchlist, setWatchlist] = useState<AssetKey[]>(() => {
@@ -298,6 +338,9 @@ export default function CommandCenter({
 
   const winTrades = trades.filter(t => t.pnl > 0);
   const winRate = trades.length > 0 ? Math.round((winTrades.length / trades.length) * 100) : 0;
+  const avgRR = trades.length > 0 
+    ? (trades.reduce((sum, t) => sum + (t.rr || 0), 0) / trades.length).toFixed(1)
+    : '2.4';
 
   // Streak calculation
   let currentStreak = 0;
@@ -372,79 +415,124 @@ export default function CommandCenter({
   return (
     <div className="section-transition-enter space-y-6">
       
-      {/* ==================== 1. SECCIÓN DE BRIEFING (PRINCIPAL Y AL CORAZÓN DE LA PANTALLA) ==================== */}
+      {/* ==================== 1. DESK SUPERIOR: SESIONES Y RELOJ GLOBAL ==================== */}
       <div 
         id="intel-briefing" 
-        className={`p-6 rounded-2xl relative overflow-hidden flex flex-col space-y-6 ${
+        className={`p-6 rounded-2xl relative overflow-hidden flex flex-col space-y-4 ${
           theme === 'dark' ? 'glass-card-dark' : 'glass-card-light'
         }`}
       >
-        {/* Superior Header Desk */}
-        <div className={`flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b pb-4 ${
+        <div className={`flex flex-col md:flex-row md:items-center justify-between gap-4 border-b pb-4 ${
           theme === 'dark' ? 'border-white/5' : 'border-neutral-200'
         }`}>
           <div className="flex items-center gap-2.5">
-            <span className="w-2 h-2 rounded-full bg-gold-accent animate-pulse shrink-0" />
+            <span className="w-2.5 h-2.5 rounded-full bg-gold-accent animate-pulse shrink-0" />
             <div>
               <span className="text-[10px] font-mono font-bold tracking-widest text-gold-accent uppercase select-none block">
-                GLOBAL RESEARCH LABS • DECISION BRIEFING
+                KOSMOPOLY GLOBAL RESEARCH • DECISION BRIEFING
               </span>
-              <h2 className="text-base font-display font-bold mt-0.5 text-txt-primary">
-                Gabinete de Inteligencia Estratégica
+              <h2 className="text-base md:text-lg font-display font-bold mt-0.5 text-txt-primary">
+                Centro de Mando & Gabinete de Inteligencia
               </h2>
             </div>
           </div>
-          <div className={`text-xs font-mono text-txt-secondary px-3.5 py-1.5 rounded-full border flex items-center gap-1.5 self-start sm:self-auto transition-colors ${
-            theme === 'dark' ? 'bg-black/30 border-white/5' : 'bg-white border-neutral-200 shadow-sm'
-          }`}>
-            <Clock className="w-3.5 h-3.5 text-gold-accent shrink-0" />
-            <span className="tracking-tight select-none">{timeStr || 'SINCRONIZANDO DATOS...'}</span>
+          
+          <div className="flex items-center gap-3 flex-wrap">
+            <div className={`text-xs font-mono text-txt-secondary px-3.5 py-1.5 rounded-full border flex items-center gap-1.5 transition-colors ${
+              theme === 'dark' ? 'bg-black/30 border-white/5' : 'bg-white border-neutral-200 shadow-sm'
+            }`}>
+              <Clock className="w-3.5 h-3.5 text-gold-accent shrink-0" />
+              <span className="tracking-tight select-none">{timeStr || 'SINCRONIZANDO DATOS...'}</span>
+            </div>
+
+            <button
+              onClick={() => onNavigate('journal')}
+              className="text-xs font-bold font-mono px-3.5 py-1.5 rounded-full bg-gold-accent text-black clay-btn-gold cursor-pointer flex items-center gap-1.5 transition"
+            >
+              <Award className="w-3.5 h-3.5" /> Diario en Finanzas ({trades.length})
+            </button>
           </div>
         </div>
 
-        {/* Dynamic Split Layout: Macro Summary vs Selectable Asset Intelligence */}
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 pt-1">
-          
-          {/* LEFT: SITUACIÓN MACRO GLOBAL (5/12 cols) */}
-          <div className="lg:col-span-5 space-y-4">
-            <div className="flex items-center gap-2">
-              <Globe className="w-4 h-4 text-gold-accent" />
-              <h3 className="text-xs font-bold font-mono uppercase tracking-wider text-txt-primary select-none">
-                Estructura Geopolítica & Macro
-              </h3>
+        {/* Sessions Clock / Desk Bar */}
+        <div className="flex flex-wrap items-center justify-between gap-4 pt-1 select-none">
+          <div className="flex flex-wrap gap-4 sm:gap-6">
+            <div className="space-y-0.5">
+              <p className="text-[9px] text-txt-muted uppercase font-mono tracking-wider font-semibold">Sesión Londres</p>
+              <p className="text-[11px] font-mono text-txt-primary flex items-center gap-1.5">
+                <span className={`w-1.5 h-1.5 rounded-full ${sessionCountdowns.London.includes('VIVO') ? 'bg-success animate-pulse' : 'bg-txt-muted'}`} />
+                {sessionCountdowns.London}
+              </p>
             </div>
-            
-            <p className="text-xs text-txt-secondary leading-relaxed">
-              El mercado asimila un entorno macro de <span className="text-txt-primary font-semibold">"Apetito por Riesgo"</span> inducido por el retroceso persistente de la inflación subyacente. Los flujos de capital retornan sistemáticamente desde bonos corporativos duros hacia acciones tecnológicas de punta y activos criptográficos.
-            </p>
-
-            <div className="space-y-3 pt-1">
-              <div className={`p-4 rounded-2xl flex items-start gap-3 transition border ${
-                theme === 'dark' ? 'bg-white/[0.02] border-white/5 hover:border-white/10' : 'bg-neutral-50 border-neutral-100 hover:border-neutral-200'
-              }`}>
-                <span className="mt-1.5 h-1.5 w-1.5 rounded-full bg-gold-accent shrink-0" />
-                <p className="text-[11px] text-txt-secondary leading-relaxed">
-                  <strong className="text-txt-primary font-mono block mb-0.5 text-[9px] uppercase tracking-wider">ESTRECHO DE ORMUZ (PRIMAS)</strong>
-                  Ampliación del colchón de precios de materias primas por monitoreo de patrullas pesadas en canales de flujo. Coberturas activas vigentes.
-                </p>
-              </div>
-
-              <div className={`p-4 rounded-2xl flex items-start gap-3 transition border ${
-                theme === 'dark' ? 'bg-white/[0.02] border-white/5 hover:border-white/10' : 'bg-neutral-50 border-neutral-100 hover:border-neutral-200'
-              }`}>
-                <span className="mt-1.5 h-1.5 w-1.5 rounded-full bg-teal-accent shrink-0" />
-                <p className="text-[11px] text-txt-secondary leading-relaxed">
-                  <strong className="text-txt-primary font-mono block mb-0.5 text-[9px] uppercase tracking-wider">RESILENCIA EN RENDIMIENTO (FED)</strong>
-                  Especulación de recortes de tipos a corto plazo canaliza compras automáticas sobre correcciones profundas del S&P 500 y BTC.
-                </p>
-              </div>
+            <div className="space-y-0.5">
+              <p className="text-[9px] text-txt-muted uppercase font-mono tracking-wider font-semibold">Sesión Nueva York</p>
+              <p className="text-[11px] font-mono text-txt-primary flex items-center gap-1.5">
+                <span className={`w-1.5 h-1.5 rounded-full ${sessionCountdowns.NewYork.includes('VIVO') ? 'bg-success animate-pulse' : 'bg-txt-muted'}`} />
+                {sessionCountdowns.NewYork}
+              </p>
+            </div>
+            <div className="space-y-0.5">
+              <p className="text-[9px] text-txt-muted uppercase font-mono tracking-wider font-semibold">Sesión Asia</p>
+              <p className="text-[11px] font-mono text-txt-primary flex items-center gap-1.5">
+                <span className={`w-1.5 h-1.5 rounded-full ${sessionCountdowns.Asia.includes('VIVO') ? 'bg-success animate-pulse' : 'bg-txt-muted'}`} />
+                {sessionCountdowns.Asia}
+              </p>
             </div>
           </div>
 
-          {/* RIGHT: SELECTABLE ASSET NEWS SUMMARY (7/12 cols) */}
-          <div className={`lg:col-span-7 space-y-4 lg:pl-6 lg:border-l ${
-            theme === 'dark' ? 'border-white/5' : 'border-neutral-200'
-          }`}>
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] font-mono text-txt-secondary bg-black/20 px-2.5 py-1 rounded-full border border-white/5">
+              Tasa Acierto: <strong className="text-gold-accent">{winRate}%</strong>
+            </span>
+            <span className="text-[10px] font-mono text-txt-secondary bg-black/20 px-2.5 py-1 rounded-full border border-white/5">
+              R:R Medio: <strong className="text-teal-accent">{avgRR}R</strong>
+            </span>
+          </div>
+        </div>
+      </div>
+
+      {/* ==================== 2. RADAR MACRO GLOBAL (PROTAGONISTA) ==================== */}
+      <div id="macro-radar-hub" className={`p-6 rounded-2xl border transition-all ${
+        theme === 'dark' ? 'bg-[#10121A] border-white/5 shadow-2xl' : 'bg-white border-neutral-200 shadow-md'
+      }`}>
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-white/5 pb-4 mb-6">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-gold-accent/15 border border-gold-accent/30 flex items-center justify-center text-gold-accent shrink-0">
+              <Globe className="w-5 h-5 animate-pulse" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="text-[9px] font-mono font-bold tracking-widest text-gold-accent uppercase px-2 py-0.5 rounded-full bg-gold-accent/10 border border-gold-accent/20">
+                  NÚCLEO ESTRATÉGICO PROTAGONISTA
+                </span>
+                <span className="text-[10px] font-mono text-txt-muted flex items-center gap-1">
+                  <span className="w-1.5 h-1.5 rounded-full bg-success animate-pulse" /> LIVE STREAMING
+                </span>
+              </div>
+              <h2 className="text-base sm:text-lg font-display font-black text-txt-primary mt-0.5">
+                Radar Macroeconómico & Geopolítica Global
+              </h2>
+            </div>
+          </div>
+
+          <p className="text-[11px] text-txt-muted max-w-sm hidden lg:block text-right">
+            Daily Brief, noticias RSS en vivo, calendario de alto impacto, seguimiento geopolítico y tesis semanal.
+          </p>
+        </div>
+
+        {/* Embedded Complete Macro Radar Component */}
+        <MacroRadar 
+          economicEvents={economicEvents}
+          theme={theme}
+          customSignals={customSignals}
+        />
+      </div>
+
+      {/* ==================== 3. VIGILANCIA DE ACTIVOS GLOBALES ==================== */}
+      <div className={`p-6 rounded-2xl border space-y-4 ${
+        theme === 'dark' ? 'bg-[#10121A] border-white/5' : 'bg-white border-neutral-200 shadow-sm'
+      }`}>
+        <div className="space-y-4">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div className="flex items-center gap-2">
                 <Cpu className="w-4 h-4 text-teal-accent" />
@@ -583,6 +671,21 @@ export default function CommandCenter({
                         <Star className={`w-3 h-3 ${watchlist.includes(selectedAsset) ? 'text-gold-accent fill-gold-accent' : ''}`} />
                         <span>{watchlist.includes(selectedAsset) ? 'En tu Lista' : 'Seguir'}</span>
                       </button>
+
+                      {/* Botón Ver Análisis 360 directo */}
+                      <button
+                        onClick={handleLaunch360}
+                        disabled={is360Loading}
+                        className={`p-1 px-2.5 rounded-full border text-[10px] font-mono font-bold cursor-pointer transition flex items-center gap-1 disabled:opacity-50 ${
+                          theme === 'dark'
+                            ? 'bg-cyan-500/10 border-cyan-500/30 text-cyan-400 hover:bg-cyan-500/20'
+                            : 'bg-cyan-50 border-cyan-200 text-cyan-700 hover:bg-cyan-100'
+                        }`}
+                        title={`Ejecutar análisis 360 institucional para ${selectedAsset}`}
+                      >
+                        <Sparkles className="w-3 h-3 text-cyan-400" />
+                        <span>Ver Análisis 360</span>
+                      </button>
                     </div>
                     
                     {/* Bias Badge */}
@@ -618,53 +721,151 @@ export default function CommandCenter({
                         {assetNews[selectedAsset]?.technical}
                       </p>
                     </div>
+
+                    {/* Botón de Lanzamiento Análisis 360 */}
+                    <div className={`border-t pt-3.5 flex flex-col sm:flex-row items-center justify-between gap-3 ${theme === 'dark' ? 'border-white/5' : 'border-neutral-150'}`}>
+                      <div className="flex items-center gap-2 text-[10px] font-mono text-txt-muted">
+                        <Sparkles className="w-3.5 h-3.5 text-gold-accent" />
+                        <span>MÓDULO DE INTELIGENCIA CUANTITATIVA KOSMOPOLY</span>
+                      </div>
+                      <button
+                        onClick={handleLaunch360}
+                        disabled={is360Loading}
+                        className="w-full sm:w-auto px-4 py-2 rounded-full text-xs font-bold uppercase tracking-wider clay-btn-gold text-black transition flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+                      >
+                        {is360Loading ? (
+                          <>
+                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                            <span>Procesando Paso {step360 || 1}...</span>
+                          </>
+                        ) : (
+                          <>
+                            <FileText className="w-3.5 h-3.5" />
+                            <span>Ejecutar Análisis 360 SSE</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
                   </div>
                 </div>
               </>
             )}
 
           </div>
-
         </div>
 
-        {/* Sessions Clock / Footnotes footer */}
-        <div className={`pt-4 flex flex-col sm:flex-row items-center justify-between border-t gap-4 ${
-          theme === 'dark' ? 'border-white/5' : 'border-neutral-200'
-        }`}>
-          <div className="flex flex-wrap gap-5 select-none">
-            <div className="space-y-0.5">
-              <p className="text-[9px] text-txt-muted uppercase font-mono tracking-wider font-semibold">Londres Session</p>
-              <p className="text-[11px] font-mono text-txt-primary flex items-center gap-1.5">
-                <span className={`w-1.5 h-1.5 rounded-full ${sessionCountdowns.London.includes('VIVO') ? 'bg-success animate-pulse' : 'bg-txt-muted'}`} />
-                {sessionCountdowns.London}
-              </p>
+      {/* ==================== MODAL DE ESTADO SSE ANÁLISIS 360 ==================== */}
+      {show360Modal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md">
+          <div className={`w-full max-w-4xl rounded-3xl border p-5 md:p-6 space-y-4 max-h-[92vh] flex flex-col ${
+            theme === 'dark' ? 'bg-[#0A0C10] border-white/10 text-white' : 'bg-white border-neutral-200 text-neutral-900 shadow-2xl'
+          }`}>
+            {/* Header del Modal */}
+            <div className="flex items-center justify-between border-b pb-4 border-white/10 shrink-0">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-full bg-cyan-500/10 border border-cyan-500/30 flex items-center justify-center text-cyan-400 font-bold text-xs">
+                  360°
+                </div>
+                <div>
+                  <h3 className="text-sm font-display font-bold uppercase tracking-wide">
+                    Análisis 360 • {selectedAsset}
+                  </h3>
+                  <p className="text-[10px] font-mono text-txt-muted uppercase">
+                    Terminal Institucional Multi-Agente • Transmisión en Vivo
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => {
+                    if (is360Loading) abortAnalysis360();
+                    setShow360Modal(false);
+                    onNavigate('analysis-360');
+                  }}
+                  className="px-3 py-1 text-[10px] font-mono uppercase font-bold rounded-lg border border-cyan-500/30 text-cyan-400 hover:bg-cyan-500/10 transition cursor-pointer"
+                  title="Abrir en pantalla completa dedicada"
+                >
+                  Modo Pantalla Completa
+                </button>
+                <button
+                  onClick={() => {
+                    if (is360Loading) abortAnalysis360();
+                    setShow360Modal(false);
+                  }}
+                  className="p-1.5 rounded-full hover:bg-neutral-800 text-txt-secondary hover:text-white cursor-pointer transition"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
             </div>
-            <div className="space-y-0.5">
-              <p className="text-[9px] text-txt-muted uppercase font-mono tracking-wider font-semibold">Nueva York Session</p>
-              <p className="text-[11px] font-mono text-txt-primary flex items-center gap-1.5">
-                <span className={`w-1.5 h-1.5 rounded-full ${sessionCountdowns.NewYork.includes('VIVO') ? 'bg-success animate-pulse' : 'bg-txt-muted'}`} />
-                {sessionCountdowns.NewYork}
-              </p>
+
+            {/* Contenido scrolleable del Modal */}
+            <div className="flex-1 overflow-y-auto space-y-4 pr-1 scrollbar-custom">
+              {/* Progreso Multi-Etapa */}
+              <AnalysisProgressView
+                theme={theme}
+                status={status360}
+                currentStep={step360}
+                currentMessage={msg360}
+                fromCache={fromCache360}
+                errorMessage={error360}
+                onRetry={() => {
+                  const assetType = getAssetTypeFromKey(selectedAsset);
+                  triggerAnalysis360(selectedAsset, assetType);
+                }}
+              />
+
+              {/* Informe Final Auditado en 8 Secciones */}
+              {report360 && status360 === 'complete' && (
+                <div className="pt-2">
+                  <Analysis360Report
+                    report={report360}
+                    theme={theme}
+                    assetName={selectedAsset}
+                    assetType={getAssetTypeFromKey(selectedAsset)}
+                  />
+                </div>
+              )}
             </div>
-            <div className="space-y-0.5">
-              <p className="text-[9px] text-txt-muted uppercase font-mono tracking-wider font-semibold">Asia Session</p>
-              <p className="text-[11px] font-mono text-txt-primary flex items-center gap-1.5">
-                <span className={`w-1.5 h-1.5 rounded-full ${sessionCountdowns.Asia.includes('VIVO') ? 'bg-success animate-pulse' : 'bg-txt-muted'}`} />
-                {sessionCountdowns.Asia}
-              </p>
+
+            {/* Footer Modal con controles */}
+            <div className="flex items-center justify-between pt-3 border-t border-white/10 shrink-0">
+              <span className="text-[10px] font-mono text-txt-muted">
+                KOSMOPOLY KAPITAL • AUDIT & QUANT TERMINAL
+              </span>
+              <div className="flex gap-2">
+                {is360Loading && (
+                  <button
+                    onClick={abortAnalysis360}
+                    className="px-4 py-1.5 rounded-xl border border-red-500/30 bg-red-500/10 text-red-300 text-xs font-mono font-bold uppercase tracking-wider hover:bg-red-500/20 transition cursor-pointer"
+                  >
+                    Cancelar
+                  </button>
+                )}
+                {report360 && !is360Loading && (
+                  <button
+                    onClick={() => {
+                      const assetType = getAssetTypeFromKey(selectedAsset);
+                      triggerAnalysis360(selectedAsset, assetType);
+                    }}
+                    className="px-4 py-1.5 rounded-xl border border-cyan-500/30 bg-cyan-500/10 text-cyan-300 text-xs font-mono font-bold uppercase tracking-wider hover:bg-cyan-500/20 transition cursor-pointer"
+                  >
+                    Reejecutar
+                  </button>
+                )}
+                <button
+                  onClick={() => setShow360Modal(false)}
+                  className="px-5 py-1.5 rounded-xl bg-neutral-800 hover:bg-neutral-700 text-white text-xs font-mono font-bold uppercase tracking-wider transition cursor-pointer"
+                >
+                  Cerrar
+                </button>
+              </div>
             </div>
           </div>
-          
-          <button 
-            onClick={() => onNavigate('radar')}
-            className="px-4 py-1.5 text-[11px] uppercase tracking-wider font-bold text-black bg-gold-accent text-center clay-btn-gold cursor-pointer select-none rounded-full"
-          >
-            Abrir Radar Multidimensional →
-          </button>
         </div>
-      </div>
+      )}
 
-      {/* ==================== 2. MULTI-WIDGET LOWER GRID: CALENDAR vs LAST RUN JOURNAL ==================== */}
+      {/* ==================== 4. LOWER GRID: DIARIO & CALENDARIO / THINK TANK ==================== */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         
         {/* Economic Calendar Widget */}
@@ -729,10 +930,15 @@ export default function CommandCenter({
 
           <div className="pt-2 text-center">
             <button 
-              onClick={() => onNavigate('radar')}
+              onClick={() => {
+                const el = document.getElementById('macro-radar-hub');
+                if (el) {
+                  el.scrollIntoView({ behavior: 'smooth' });
+                }
+              }}
               className="text-[10px] font-bold text-gold-accent hover:text-white font-mono flex items-center justify-center gap-1.5 mx-auto cursor-pointer transition select-none uppercase tracking-wider"
             >
-              Consultar Calendario Completo {`>>>`}
+              Consultar Calendario Completo en Radar ↑
             </button>
           </div>
         </div>
@@ -838,7 +1044,7 @@ export default function CommandCenter({
                   onClick={() => onNavigate('journal')}
                   className="text-[10px] font-bold text-teal-accent hover:text-white font-mono flex items-center justify-center gap-1.5 mx-auto cursor-pointer transition select-none uppercase tracking-wider"
                 >
-                  Ir al Diario Completo {`>>>`}
+                  Ir al Diario de Inversiones (Finanzas) →
                 </button>
               </div>
             </div>

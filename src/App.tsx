@@ -4,17 +4,16 @@ import { Trade } from './types';
 import { Language, t } from './i18n';
 import CommandCenter from './components/CommandCenter';
 import TradeJournal from './components/TradeJournal';
-import MacroRadar from './components/MacroRadar';
 import Academy from './components/Academy';
 import Analytics from './components/Analytics';
 import Settings from './components/Settings';
 import AdminPanel from './components/AdminPanel';
 import SocialHub from './components/SocialHub';
 import FinanceCenter from './components/FinanceCenter';
+import Analyst360Page from './components/Analyst360Page';
 import { 
   LayoutDashboard, 
   BookOpen, 
-  Globe, 
   Award, 
   BarChart3, 
   Sliders, 
@@ -309,8 +308,16 @@ export default function App() {
   // Route listener
   useEffect(() => {
     const handleHashChange = () => {
-      setCurrentHash(window.location.hash || '#dashboard');
+      const h = window.location.hash || '#dashboard';
+      if (h === '#radar') {
+        window.location.hash = '#dashboard';
+        return;
+      }
+      setCurrentHash(h);
     };
+    if (window.location.hash === '#radar') {
+      window.location.hash = '#dashboard';
+    }
     window.addEventListener('hashchange', handleHashChange);
     return () => window.removeEventListener('hashchange', handleHashChange);
   }, []);
@@ -407,12 +414,15 @@ export default function App() {
             theme={theme}
             economicEvents={activeEvents}
             customAssets={adminAssets}
+            customSignals={adminSignals}
             onOpenQuickTrade={() => {
               setJournalActiveSubTab('register');
               window.location.hash = '#journal';
             }}
             onNavigate={(hash) => {
-              if (hash === '#journal-register') {
+              if (hash === 'journal' || hash === '#journal') {
+                window.location.hash = '#journal';
+              } else if (hash === '#journal-register') {
                 setJournalActiveSubTab('register');
                 window.location.hash = '#journal';
               } else if (hash === '#journal-history') {
@@ -421,8 +431,10 @@ export default function App() {
               } else if (hash === '#journal-analytics') {
                 setJournalActiveSubTab('analytics');
                 window.location.hash = '#journal';
+              } else if (hash === 'radar' || hash === '#radar') {
+                window.location.hash = '#dashboard';
               } else {
-                window.location.hash = hash;
+                window.location.hash = hash.startsWith('#') ? hash : `#${hash}`;
               }
             }}
           />
@@ -433,13 +445,6 @@ export default function App() {
             trades={trades} 
             theme={theme}
             language={language}
-          />
-        );
-      case '#journal':
-        return (
-          <TradeJournal 
-            trades={trades} 
-            theme={theme}
             onAddTrade={handleRegisterTrade}
             onDeleteTrade={async (id) => {
               if (currentUser) {
@@ -452,8 +457,31 @@ export default function App() {
                 setTrades(prev => prev.filter(t => t.id !== id));
               }
             }}
-            activeSubTab={journalActiveSubTab}
-            setActiveSubTab={setJournalActiveSubTab}
+            journalActiveSubTab={journalActiveSubTab}
+            setJournalActiveSubTab={setJournalActiveSubTab}
+          />
+        );
+      case '#journal':
+        return (
+          <FinanceCenter 
+            trades={trades} 
+            theme={theme}
+            language={language}
+            initialTab="journal"
+            onAddTrade={handleRegisterTrade}
+            onDeleteTrade={async (id) => {
+              if (currentUser) {
+                try {
+                  await deleteDoc(doc(db, 'trades', id));
+                } catch (err) {
+                  handleFirestoreError(err, OperationType.DELETE, `trades/${id}`);
+                }
+              } else {
+                setTrades(prev => prev.filter(t => t.id !== id));
+              }
+            }}
+            journalActiveSubTab={journalActiveSubTab}
+            setJournalActiveSubTab={setJournalActiveSubTab}
           />
         );
       case '#social':
@@ -464,13 +492,8 @@ export default function App() {
           />
         );
       case '#radar':
-        return (
-          <MacroRadar 
-            economicEvents={activeEvents} 
-            theme={theme}
-            customSignals={adminSignals}
-          />
-        );
+        window.location.hash = '#dashboard';
+        return null;
       case '#academy':
         return (
           <Academy 
@@ -494,6 +517,12 @@ export default function App() {
               Esta consola está reservada de forma exclusiva para el analista jefe / administrador titular de Kosmopoly Kapital.
             </p>
           </div>
+        );
+      case '#analyst360':
+        return (
+          <Analyst360Page 
+            theme={theme}
+          />
         );
       case '#settings':
         return (
@@ -527,10 +556,9 @@ export default function App() {
   // Menu items list links configuration
   const MENU_LINKS = [
     { key: 'Dashboard', icon: LayoutDashboard, hash: '#dashboard' },
+    { key: 'Analista 360', icon: Sparkles, hash: '#analyst360' },
     { key: 'Finance', icon: Wallet, hash: '#finance' },
-    { key: 'Journal', icon: Award, hash: '#journal' },
     { key: 'Social', icon: Users, hash: '#social' },
-    { key: 'Radar', icon: Globe, hash: '#radar' },
     { key: 'Academy', icon: BookOpen, hash: '#academy' },
     { key: 'Settings', icon: Sliders, hash: '#settings' },
     ...(isAdmin ? [{ key: 'Admin', icon: ShieldAlert, hash: '#admin' }] : [])
