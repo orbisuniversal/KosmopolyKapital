@@ -1,0 +1,19 @@
+runConfig:
+  minInstances: 0
+  maxInstances: 5
+  cpu: 1
+  memoryMiB: 1024
+  concurrency: 80
+
+env:
+  - variable: KOSMO_PROD_SECRETS
+    secret: KOSMO_PROD_SECRETS
+    availability: [BUILD, RUNTIME]
+
+  - variable: NODE_ENV
+    value: "production"
+    availability: [BUILD, RUNTIME]
+
+  - variable: DOSSIER_CACHE_HOURS
+    value: "5"
+    availability: [RUNTIME]

@@ -1,6 +1,21 @@
 import dotenv from "dotenv";
 dotenv.config();
 
+// Auto-inyectar secretos de GCP Secret Manager si estamos en Firebase App Hosting
+if (process.env.KOSMO_PROD_SECRETS) {
+  try {
+    const secrets = JSON.parse(process.env.KOSMO_PROD_SECRETS);
+    if (secrets.GEMINI_API_KEY && !process.env.GEMINI_API_KEY) {
+      process.env.GEMINI_API_KEY = secrets.GEMINI_API_KEY;
+    }
+    if (secrets.FRED_API_KEY && !process.env.FRED_API_KEY) {
+      process.env.FRED_API_KEY = secrets.FRED_API_KEY;
+    }
+  } catch (e) {
+    console.error("[KOSMOPOLY] Error parseando KOSMO_PROD_SECRETS:", e);
+  }
+}
+
 import express from "express";
 import path from "path";
 import { createServer as createViteServer } from "vite";
@@ -49,7 +64,7 @@ function sendSSEEvent(res: express.Response, event: SSEProgressEvent): void {
 
 async function startServer() {
   const app = express();
-  const PORT = 3000;
+  const PORT = Number(process.env.PORT) || 3000;
 
   app.use(express.json());
 

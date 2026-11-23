@@ -1,0 +1,9 @@
+{
+  "apphosting": [
+    {
+      "backendId": "kosmopoly-backend",
+      "rootDir": ".",
+      "alwaysDeployFromSource": true
+    }
+  ]
+}
