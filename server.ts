@@ -5,7 +5,9 @@ dotenv.config();
 if (process.env.KOSMO_PROD_SECRETS) {
   try {
     const secrets = JSON.parse(process.env.KOSMO_PROD_SECRETS);
-    if (secrets.GEMINI_API_KEY && !process.env.GEMINI_API_KEY) {
+    if (secrets.GEMINI_API_KEY_KOSMOPOLY && !process.env.GEMINI_API_KEY) {
+      process.env.GEMINI_API_KEY = secrets.GEMINI_API_KEY_KOSMOPOLY;
+    } else if (secrets.GEMINI_API_KEY && !process.env.GEMINI_API_KEY) {
       process.env.GEMINI_API_KEY = secrets.GEMINI_API_KEY;
     }
     if (secrets.FRED_API_KEY && !process.env.FRED_API_KEY) {

@@ -1,0 +1,15 @@
+# Kosmovizion Ecosystem — Architecture & Governance Rules (.cursorrules)
+
+This repository (**Kosmopoly**) is part of the **3-app Kosmovizion Ecosystem** sharing a single Firebase / GCP project (`studio-8364983137-70a8f`) under a Clean & Lean ($0 idle) architecture.
+
+## Ecosystem Map (Sibling Folders in `scratch/`)
+1. **Kosmovizion** (`../kosmovisionfinal`) — `kosmovizion.app` | Next.js 15 + Tailwind v3 | Backend: `kosmovizion-backend` (**MASTER REPO** for `src/firestore.rules`, `firestore.indexes.json`, `storage.rules`, and Stripe webhooks).
+2. **Kosmopoly** (`../kosmopolykapital`) — `kosmopoly.kosmovizion.app` (or custom domain) | React 19 + Vite 6 + Tailwind v4 + Express (`server.ts`) | Backend: `kosmopoly-kapital`.
+3. **Kosmonautik** (`../kosmonautik`) — `kosmonautik.kosmovizion.app` | React 19 + Vite 6 + Tailwind v4 + Three.js + Express (`server.ts`) | Backend: `kosmonautik-backend`.
+
+## Non-Negotiable Shared Rules
+- **Single Source of Truth for Security Rules**: NEVER run `firebase deploy --only firestore:rules` or `storage` from this repo. Always edit and deploy rules from `../kosmovisionfinal/src/firestore.rules`.
+- **Unified Auth & Identity**: All 3 apps share Firebase Auth and `/users/{uid}` (SSO). Do not overwrite or delete Kosmovizion fields on `/users/{uid}` — always use `merge: true` or `updateDoc`.
+- **Consolidated Secrets ($0)**: All production secrets live in a single GCP Secret Manager JSON bundle (`KOSMO_PROD_SECRETS`). Kosmopoly reads `GEMINI_API_KEY_KOSMOPOLY || GEMINI_API_KEY` and `FRED_API_KEY`.
+- **Cloud Run & Cost**: Always keep `minInstances: 0`, `PORT = Number(process.env.PORT) || 3000`, and Artifact Registry cleanup policies active.
+- **Kosmopoly Firestore Collections**: `trades`, `finance_center_data`, `social_posts`, `social_comments`, `admin_config`, `dossiers`, `usage`.
