@@ -119,6 +119,14 @@ export default function Settings({
               >
                 <LogOut className="w-4 h-4" /> Desvincular Cuenta
               </button>
+              <a
+                href="https://kosmovizion.app/es/dashboard"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="w-full py-2 px-4 text-center bg-neutral-900 hover:bg-neutral-800 border border-white/10 text-txt-secondary hover:text-txt-primary rounded-full text-[10px] font-mono uppercase tracking-wider transition"
+              >
+                Privacidad y Eliminación de Cuenta (GDPR)
+              </a>
             </div>
           </div>
         ) : (

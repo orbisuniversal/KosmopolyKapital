@@ -178,6 +178,7 @@ const SocialHub: React.FC<SocialHubProps> = ({ theme, currentUser }) => {
     try {
       const newComment = {
         postId: selectedPost.id,
+        authorId: currentUser?.uid || 'anon',
         userId: currentUser?.uid || 'anon',
         userName: currentUser?.displayName || currentUser?.email?.split('@')[0] || 'Trader',
         userPhoto: currentUser?.photoURL || '',
@@ -223,6 +224,7 @@ const SocialHub: React.FC<SocialHubProps> = ({ theme, currentUser }) => {
     const finalAsset = newPostAsset.trim().toUpperCase() || undefined;
     
     const newPost: any = {
+      authorId: currentUser?.uid || 'anon',
       userId: currentUser?.uid || 'anon',
       userName: currentUser?.displayName || currentUser?.email?.split('@')[0] || 'Trader Elite',
       userRole: currentUser?.email === 'orbisuniversal@gmail.com' ? 'ADMIN' : 'TRADER',

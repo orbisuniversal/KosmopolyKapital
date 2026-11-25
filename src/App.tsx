@@ -34,7 +34,7 @@ import {
   Users,
   Wallet
 } from 'lucide-react';
-import { auth, db, loginWithGoogle, logoutUser, handleFirestoreError, OperationType, verifyFirestoreConnection, cleanUndefined } from './firebase';
+import { auth, db, loginWithGoogle, logoutUser, attemptEcosystemSSO, handleFirestoreError, OperationType, verifyFirestoreConnection, cleanUndefined } from './firebase';
 import firebaseConfig from '../firebase-applet-config.json';
 import { onAuthStateChanged, User as FirebaseUser } from 'firebase/auth';
 import { 
@@ -173,6 +173,7 @@ export default function App() {
 
   // Auth State Listener
   useEffect(() => {
+    attemptEcosystemSSO().catch(() => {});
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       setIsFirebaseLoading(true);
       setFirestoreWarning(null);
@@ -204,16 +205,18 @@ export default function App() {
           } else {
             const newProfile = {
               id: user.uid,
+              uid: user.uid,
               email: user.email || '',
               displayName: user.displayName || 'Operador Kosmopoly',
               photoURL: user.photoURL || '',
-              role: 'ASSOCIATE',
+              role: 'member',
+              kosmopolyRole: 'ASSOCIATE',
+              tier: 'user',
               createdAt: serverTimestamp(),
               updatedAt: serverTimestamp()
             };
-            console.log("[KOSMOPOLY] Profile does not exist. Creating new profile payload:", newProfile);
             try {
-              await setDoc(profileRef, cleanUndefined(newProfile));
+              await setDoc(profileRef, cleanUndefined(newProfile), { merge: true });
               console.log("[KOSMOPOLY] Profile successfully created in Firestore.");
               setUserProfile({
                 ...newProfile,
@@ -650,7 +653,7 @@ export default function App() {
 
           <div className="pt-2 border-t border-white/5 text-[9px] font-mono text-txt-muted flex items-center justify-center gap-1.5 uppercase leading-none">
             <span className="w-1.5 h-1.5 rounded-full bg-teal-accent animate-ping" />
-            <span>KOSMOPOLY GINEBRA SERVERS • STATUS OK</span>
+            <span>KOSMOPOLY KAPITAL • ESTUDIO CUANTITATIVO &amp; EDUCATIVO</span>
           </div>
         </div>
       </div>
@@ -737,7 +740,7 @@ export default function App() {
             </div>
 
             <p className="text-[9px] font-mono text-txt-muted uppercase">
-              KOSMOPOLY KAPITAL INC. © SUIZA GENEVA SERVERS • ESTUDIO DE RIESGO
+              KOSMOPOLY KAPITAL · ECOSISTEMA KOSMOVIZION • INVESTIGACIÓN EDUCATIVA (NO ES ASESORAMIENTO FINANCIERO)
             </p>
           </div>
         </div>
@@ -830,7 +833,7 @@ export default function App() {
             </div>
 
             <div className="flex items-center gap-1.5">
-              <span className="text-txt-muted text-[9px] uppercase">DB({firebaseConfig.firestoreDatabaseId || 'DFLT'}):</span>
+              <span className="text-txt-muted text-[9px] uppercase">DB({(firebaseConfig as { firestoreDatabaseId?: string }).firestoreDatabaseId || 'DFLT'}):</span>
               <span className={firestoreWarning ? "text-warning font-bold font-mono animate-pulse" : "text-success font-bold font-mono"}>
                 {isFirebaseLoading ? "SYNCING..." : (firestoreWarning ? "OFFLINE/LOCAL" : "ONLINE")}
               </span>
@@ -976,7 +979,7 @@ export default function App() {
                   <span className="font-bold uppercase tracking-wider block text-gold-accent">Aviso del Sistema • Consola Cloud de Kosmopoly</span>
                   <p className="text-txt-secondary leading-normal leading-relaxed text-left">
                     {firestoreWarning.includes('Missing or insufficient permissions') || firestoreWarning.toLowerCase().includes('permission') 
-                      ? `Error de Permisos: El servidor de Firebase rechazó la petición. Proyecto: ${firebaseConfig.projectId}. Base de datos: ${firebaseConfig.firestoreDatabaseId || '(default)'}. Detalle: ${firestoreWarning}. Asegúrate de que las reglas allow read, write: if true; estén activas globalmente.`
+                      ? `Error de Permisos: El servidor de Firebase rechazó la petición. Proyecto: ${firebaseConfig.projectId}. Detalle: ${firestoreWarning}.`
                       : `Hemos detectado un problema con la base de datos de Firestore en el proyecto "${firebaseConfig.projectId}". La terminal operará temporalmente de forma local. Detalle: ${firestoreWarning}`}
                   </p>
                   {auth.currentUser && (

@@ -21,7 +21,9 @@ if (process.env.KOSMO_PROD_SECRETS) {
 import express from "express";
 import path from "path";
 import { createServer as createViteServer } from "vite";
-import { GoogleGenAI } from "@google/genai";
+import { GoogleGenAI, HarmCategory, HarmBlockThreshold } from "@google/genai";
+import { getApps as getAdminApps, initializeApp as initializeAdminApp } from "firebase-admin/app";
+import { getAuth as getAdminAuth } from "firebase-admin/auth";
 import { getFredSeries, getStablecoinSupplyHistory, getChainTVLHistory } from "./src/services/dataSources";
 import {
   computeRollingPearsonCorrelation,
@@ -39,23 +41,57 @@ import {
   incrementDailyCacheHits,
 } from "./src/services/dossierCache";
 
-// In-memory rate limiting map for /api/analysis-360 (10 requests per 5 minutes per IP)
+// Bounded rate limiting map (max 5000 keys) keyed by verified UID or trusted req.ip
 const rateLimitMap = new Map<string, number[]>();
 const RATE_LIMIT_WINDOW_MS = 5 * 60 * 1000;
 const RATE_LIMIT_MAX_REQUESTS = 10;
 
-function checkRateLimit(ip: string): boolean {
+function checkRateLimit(key: string): boolean {
   const now = Date.now();
-  const timestamps = rateLimitMap.get(ip) || [];
+  if (rateLimitMap.size >= 5000 && !rateLimitMap.has(key)) {
+    const oldest = rateLimitMap.keys().next().value;
+    if (oldest) rateLimitMap.delete(oldest);
+  }
+  const timestamps = rateLimitMap.get(key) || [];
   const validTimestamps = timestamps.filter(t => now - t < RATE_LIMIT_WINDOW_MS);
   if (validTimestamps.length >= RATE_LIMIT_MAX_REQUESTS) {
-    rateLimitMap.set(ip, validTimestamps);
+    rateLimitMap.set(key, validTimestamps);
     return false;
   }
   validTimestamps.push(now);
-  rateLimitMap.set(ip, validTimestamps);
+  rateLimitMap.set(key, validTimestamps);
   return true;
 }
+
+function getFirebaseAdminAuth() {
+  if (getAdminApps().length === 0) {
+    initializeAdminApp({
+      projectId: process.env.FIREBASE_PROJECT_ID || 'studio-8364983137-70a8f',
+    });
+  }
+  return getAdminAuth();
+}
+
+async function requireFirebaseAuth(
+  req: express.Request,
+  res: express.Response,
+  next: express.NextFunction
+) {
+  const authHeader = req.headers.authorization;
+  if (!authHeader?.startsWith('Bearer ')) {
+    return res.status(401).json({ error: 'Autenticación requerida para ejecutar análisis IA.' });
+  }
+  try {
+    const decoded = await getFirebaseAdminAuth().verifyIdToken(authHeader.slice(7));
+    (req as express.Request & { uid?: string }).uid = decoded.uid;
+    return next();
+  } catch {
+    return res.status(401).json({ error: 'Sesión inválida o expirada. Inicia sesión de nuevo.' });
+  }
+}
+
+let cachedPrices: { data: unknown[]; timestamp: number } | null = null;
+const PRICES_CACHE_TTL_MS = 60 * 1000;
 
 function sendSSEEvent(res: express.Response, event: SSEProgressEvent): void {
   res.write(`data: ${JSON.stringify(event)}\n\n`);
@@ -68,7 +104,29 @@ async function startServer() {
   const app = express();
   const PORT = Number(process.env.PORT) || 3000;
 
-  app.use(express.json());
+  app.disable('x-powered-by');
+  app.set('trust proxy', 1);
+  app.use(express.json({ limit: '64kb' }));
+
+  app.use((req, res, next) => {
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+    res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+    res.setHeader('Strict-Transport-Security', 'max-age=63072000; includeSubDomains; preload');
+    const origin = req.headers.origin;
+    if (origin && (origin.endsWith('.kosmovizion.app') || origin === 'https://kosmovizion.app' || origin.includes('localhost') || origin.startsWith('capacitor://'))) {
+      res.setHeader('Access-Control-Allow-Origin', origin);
+      res.setHeader('Access-Control-Allow-Credentials', 'true');
+      res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+      res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+    }
+    if (req.method === 'OPTIONS') return res.sendStatus(204);
+    next();
+  });
+
+  app.get('/health', (_req, res) => {
+    res.status(200).json({ status: 'ok', service: 'kosmopoly-kapital' });
+  });
 
   // XML string cleaning utility
   function cleanXmlString(str: string): string {
@@ -289,6 +347,10 @@ async function startServer() {
       { id: 'eurusd', symbol: 'EUR/USD', query: 'EURUSD=X', fallbackPrice: '1.0881' }
     ];
 
+    if (cachedPrices && Date.now() - cachedPrices.timestamp < PRICES_CACHE_TTL_MS) {
+      return res.json({ success: true, data: cachedPrices.data, cached: true });
+    }
+
     try {
       const results = await Promise.all(
         tickers.map(async (t) => {
@@ -297,15 +359,16 @@ async function startServer() {
             const resp = await fetch(url, {
               headers: {
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36'
-              }
+              },
+              signal: AbortSignal.timeout(5000),
             });
             if (!resp.ok) {
-              return { symbol: t.symbol, price: t.fallbackPrice, change: 0.15, isUp: true };
+              return { symbol: t.symbol, price: t.fallbackPrice, change: 0, isUp: true, isFallback: true };
             }
             const data = await resp.json();
             const meta = data?.chart?.result?.[0]?.meta;
             if (!meta) {
-              return { symbol: t.symbol, price: t.fallbackPrice, change: 0.15, isUp: true };
+              return { symbol: t.symbol, price: t.fallbackPrice, change: 0, isUp: true, isFallback: true };
             }
 
             const current = meta.regularMarketPrice;
@@ -335,6 +398,7 @@ async function startServer() {
         })
       );
 
+      cachedPrices = { data: results, timestamp: Date.now() };
       res.json({
         success: true,
         data: results
@@ -347,8 +411,12 @@ async function startServer() {
     }
   });
 
-  // Geopolitical Live AI Analysis
-  app.get("/api/geopolitical-analysis", async (req, res) => {
+  // Geopolitical Live AI Analysis (authenticated + rate-limited)
+  app.get("/api/geopolitical-analysis", requireFirebaseAuth, async (req, res) => {
+    const uid = (req as express.Request & { uid?: string }).uid || req.ip || 'anon';
+    if (!checkRateLimit(`geo_${uid}`)) {
+      return res.status(429).json({ error: 'Límite de análisis geopolítico alcanzado. Espera unos minutos.' });
+    }
     const conflictId = req.query.id as string || 'C1';
     
     // Find matching conflict
@@ -408,19 +476,27 @@ Estructura tu análisis estrictamente en español con formato Markdown en 4 secc
 ### 📈 2. Impacto de Precios en Activos Concretos
 [Detalla cómo afecta individualmente a los activos listados: ${conflict.assetsAffected.join(', ')}. Explica la correlación y el flujo de capital (Flight to Safety, etc.).]
 
-### ⚡ 3. Sugerencia de Operación Táctica (Trade Idea Setup)
-[Provee un plan de trading institucional con un setup claro para un activo de los afectados. Incluye: Activo, Dirección (Long/Short), Nivel Técnico a vigilar y Justificación.]
+### ⚡ 3. Escenario Macro Condicional (Solo Análisis Educativo)
+[Describe de forma puramente académica y descriptiva los niveles técnicos clave y catalizadores observados en un activo afectado. NO emitas órdenes ni consejos de compra/venta.]
 
 ### 🚨 4. Indicador "Trigger" de Gabinete
 [Define un evento específico del mundo real que actuaría como detonante para elevar la intensidad de esta crisis o anular el escenario base.]`;
 
+          const safetySettings = [
+            { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE },
+            { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE },
+            { category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE },
+            { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE },
+          ];
+
           let response;
           try {
             response = await ai.models.generateContent({
-              model: "gemini-3.5-flash",
+              model: "gemini-2.5-flash",
               contents: prompt,
               config: {
                 temperature: 0.75,
+                safetySettings,
               }
             });
             responseText = response?.text || "";
@@ -428,10 +504,11 @@ Estructura tu análisis estrictamente en español con formato Markdown en 4 secc
           } catch (modelErr: any) {
             try {
               response = await ai.models.generateContent({
-                model: "gemini-3.1-flash-lite",
+                model: "gemini-2.5-flash-lite",
                 contents: prompt,
                 config: {
                   temperature: 0.75,
+                  safetySettings,
                 }
               });
               responseText = response?.text || "";
@@ -544,24 +621,31 @@ Cualquier daño físico o "sabotaje técnico" sospechoso reportado en las línea
       });
     }
 
-    // Rate Limiting por IP (10 peticiones cada 5 minutos)
-    const clientIp = (req.headers['x-forwarded-for'] as string || req.socket.remoteAddress || 'unknown-ip').split(',')[0].trim();
-    if (!checkRateLimit(clientIp)) {
+    // Rate Limiting por UID autenticado (10 peticiones cada 5 minutos)
+    const uid = (req as express.Request & { uid?: string }).uid || req.ip || 'unknown';
+    if (!checkRateLimit(uid)) {
       return res.status(429).json({
         error: 'Límite de solicitudes alcanzado para este recurso. Por favor intenta de nuevo en unos minutos.'
       });
     }
 
-    // 2. Configuración estricta de headers SSE
+    // 2. Configuración estricta de headers SSE (evitar buffering de proxy)
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache');
     res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Accel-Buffering', 'no');
     res.flushHeaders();
 
-    // Detección de desconexión del cliente para abortar procesamiento
+    // Detección de desconexión del cliente y heartbeat cada 15s para proxies Cloud Run
     let isClientConnected = true;
+    const heartbeat = setInterval(() => {
+      if (isClientConnected) {
+        res.write(': ping\n\n');
+      }
+    }, 15000);
     req.on('close', () => {
       isClientConnected = false;
+      clearInterval(heartbeat);
     });
 
     try {
@@ -720,8 +804,10 @@ Cualquier daño físico o "sabotaje técnico" sospechoso reportado en las línea
         },
       });
 
+      clearInterval(heartbeat);
       res.end();
     } catch (err: any) {
+      clearInterval(heartbeat);
       console.error(`[Analysis-360 Error] Asset: ${assetName}, Error:`, err);
       if (isClientConnected) {
         sendSSEEvent(res, {
@@ -733,10 +819,8 @@ Cualquier daño físico o "sabotaje técnico" sospechoso reportado en las línea
     }
   };
 
-  // Soportar tanto POST como GET para máxima versatilidad
-  app.post("/api/analysis-360", handleAnalysis360Request);
-  app.get("/api/analysis-360/:assetName", handleAnalysis360Request);
-  app.get("/api/analysis-360", handleAnalysis360Request);
+  // POST autenticado únicamente (bloquea disparos cross-origin por GET)
+  app.post("/api/analysis-360", requireFirebaseAuth, handleAnalysis360Request);
 
   // Vite integration
   if (process.env.NODE_ENV !== "production") {

@@ -1,4 +1,4 @@
-import { GoogleGenAI } from '@google/genai';
+import { GoogleGenAI, HarmCategory, HarmBlockThreshold, type SafetySetting } from '@google/genai';
 import {
   AgentPipelineInput,
   AgentPipelineOutput,
@@ -32,11 +32,17 @@ import {
  * Principio de Resiliencia: Nunca lanza una excepción no controlada hacia el caller.
  */
 
-// Model names with fallback mapping (using valid current models per SKILL.md)
-const MODEL_FLASH = 'gemini-3.8-flash';
-const MODEL_LITE = 'gemini-3.1-flash-lite';
-const FALLBACK_FLASH = 'gemini-3.8-flash';
-const FALLBACK_LITE = 'gemini-3.1-flash-lite';
+const MODEL_FLASH = 'gemini-2.5-flash';
+const MODEL_LITE = 'gemini-2.5-flash-lite';
+const FALLBACK_FLASH = 'gemini-2.5-flash-lite';
+const FALLBACK_LITE = 'gemini-2.5-flash';
+
+const SAFETY_SETTINGS: SafetySetting[] = [
+  { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE },
+  { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE },
+  { category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE },
+  { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE },
+];
 
 /**
  * Selecciona el sub-agente especializado según la clase de activo y profundidad de análisis.
@@ -102,7 +108,9 @@ async function callGeminiSafe(
     responseMimeType?: string;
   }
 ): Promise<{ text: string; groundingMetadata?: any }> {
-  const config: any = {};
+  const config: any = {
+    safetySettings: SAFETY_SETTINGS,
+  };
   if (params.systemInstruction) config.systemInstruction = params.systemInstruction;
   if (params.temperature !== undefined) config.temperature = params.temperature;
   if (params.seed !== undefined) config.seed = params.seed;
@@ -289,6 +297,7 @@ Provee una lista estructurada de hechos verificables con fecha aproximada y nomb
     const collectorPromise = callGeminiSafe(ai, MODEL_FLASH, FALLBACK_FLASH, {
       contents: collectorPrompt,
       systemInstruction: COLLECTOR_SYSTEM_PROMPT,
+      tools: [{ googleSearch: {} }],
       temperature: 0.7,
     });
 

@@ -28,6 +28,16 @@ interface CacheEntry {
 }
 
 const memoryCache = new Map<string, CacheEntry>();
+const MAX_CACHE_ENTRIES = 200;
+const CACHE_TTL_MS = 15 * 60 * 1000;
+
+function setBoundedCache(key: string, data: TimeSeriesPoint[]) {
+  if (memoryCache.size >= MAX_CACHE_ENTRIES) {
+    const oldestKey = memoryCache.keys().next().value;
+    if (oldestKey) memoryCache.delete(oldestKey);
+  }
+  memoryCache.set(key, { data, timestamp: Date.now() });
+}
 
 // Simple throttle utility for FRED calls (~120 req/min recommended limit)
 let lastFredRequestTime = 0;
@@ -156,10 +166,9 @@ fredBreaker.fallback((err: any, args: { seriesId: string; options?: FredOptions 
     };
   }
 
-  const syntheticData = generateSyntheticTimeSeries(args.seriesId);
   return {
     source: 'degraded' as const,
-    data: syntheticData,
+    data: [],
     reason: `FRED de contingencia (sin clave API o fallo de red): ${err?.message || 'Conexión no disponible'}`,
   };
 });

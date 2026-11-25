@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { EconomicEvent, GeopoliticalConflict } from '../types';
+import { getAuthHeaders } from '../firebase';
 import { REAL_EVENTS, GF_CONFLICTS, MARKET_PULSE_DATA } from '../data';
 import { 
   Globe, 
@@ -322,7 +323,9 @@ export default function MacroRadar({ economicEvents, theme, customSignals }: Mac
   const fetchGeopoliticalAnalysis = async (conflictId: string) => {
     setIsAnalyzingGeo(true);
     try {
-      const response = await fetch(`/api/geopolitical-analysis?id=${conflictId}`);
+      const baseUrl = (import.meta as unknown as { env?: Record<string, string> }).env?.VITE_API_BASE_URL || '';
+      const headers = await getAuthHeaders();
+      const response = await fetch(`${baseUrl}/api/geopolitical-analysis?id=${conflictId}`, { headers });
       if (!response.ok) {
         throw new Error('Analysis request failed');
       }
